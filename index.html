@@ -699,9 +699,41 @@ function buildSnapshot(){
 function refreshActiveScreen(){
   var sup = document.getElementById('screen-supervisor');
   var op = document.getElementById('screen-operator');
+  var login = document.getElementById('screen-login');
+
+  // Supervisor activo: refrescar monitor y tabla
   if(sup && sup.classList.contains('active')){
     if(typeof renderSupMonitor==='function') renderSupMonitor();
     if(typeof renderSurtidosTable==='function') renderSurtidosTable();
+  }
+
+  // Login activo: si el panel de operadores está abierto, refrescar la lista
+  if(login && login.classList.contains('active')){
+    var panel = document.getElementById('op-select-panel');
+    if(panel && panel.style.display!=='none'){
+      if(typeof renderOpSelectList==='function') renderOpSelectList();
+    }
+  }
+
+  // Operador activo: refrescar su cola y lista (por si el supervisor le asignó algo nuevo)
+  if(op && op.classList.contains('active')){
+    if(G.currentOpId){
+      // Si el operador aún no tiene surtido actual pero ahora le asignaron uno, engancharlo
+      if(!G.currentSurtidoId){
+        var queue = G.assignments[G.currentOpId]||[];
+        var sid = queue.find(function(id){ return G.surtidos[id] && G.surtidos[id].status!=='done'; });
+        if(sid){
+          G.currentSurtidoId = sid;
+          if(typeof hideOperatorWaiting==='function') hideOperatorWaiting();
+          if(typeof initOpState==='function') initOpState(G.currentOpId, sid);
+          if(typeof renderOperatorScreen==='function') renderOperatorScreen();
+          if(typeof renderOpScan==='function') renderOpScan();
+          return;
+        }
+      }
+      if(typeof renderOpQueue==='function') renderOpQueue();
+      if(typeof renderOpList==='function') renderOpList();
+    }
   }
 }
 
@@ -819,9 +851,35 @@ function renderOpSelectList(){
       '<div style="flex:1"><div style="font-size:14px;font-weight:700;color:#fff">'+op.name+'</div>'+
       '<div style="font-size:11px;color:rgba(255,255,255,0.5)">'+(hasSurtidos?queue.length+' surtido(s) asignado(s)':'Sin surtidos asignados aún')+'</div></div>'+
       (hasSurtidos?'<span style="font-size:18px;color:rgba(255,255,255,0.5)">→</span>':'');
-    if(hasSurtidos) btn.onclick=function(){enterOperator(op.id);};
+    btn.onclick=function(){enterOperator(op.id);};
+    btn.style.cursor='pointer'; btn.style.opacity='1';
     c.appendChild(btn);
   });
+}
+
+
+function showOperatorWaiting(opId){
+  var op = G.operators.find(function(o){return o.id===opId;});
+  var nm = op ? op.name : 'Operador';
+  // Render una pantalla simple de espera dentro de screen-operator
+  var scr = document.getElementById('screen-operator');
+  if(!scr) return;
+  var wait = document.getElementById('op-waiting-box');
+  if(!wait){
+    wait = document.createElement('div');
+    wait.id='op-waiting-box';
+    wait.style.cssText='position:fixed;inset:0;background:var(--text);color:#fff;z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px;text-align:center';
+    document.body.appendChild(wait);
+  }
+  wait.style.display='flex';
+  wait.innerHTML='<div style="font-size:48px;margin-bottom:16px">⏳</div>'+
+    '<div style="font-size:20px;font-weight:800;margin-bottom:8px">Hola, '+nm+'</div>'+
+    '<div style="font-size:14px;color:rgba(255,255,255,0.6);max-width:300px;line-height:1.5">Esperando que el supervisor te asigne surtidos. Esta pantalla se actualiza sola.</div>'+
+    '<button onclick="goLogin()" style="margin-top:24px;background:rgba(255,255,255,0.12);color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:13px">← Volver</button>';
+}
+function hideOperatorWaiting(){
+  var wait=document.getElementById('op-waiting-box');
+  if(wait) wait.style.display='none';
 }
 
 function enterOperator(opId){
@@ -833,7 +891,11 @@ function enterOperator(opId){
     return s&&s.status!=='done';
   });
   if(!sid){
-    alert('No hay surtidos pendientes para este operador.');return;
+    // Entrar igual en modo ESPERA - se enganchará solo cuando el supervisor asigne
+    G.currentSurtidoId=null;
+    showScreen('operator');
+    showOperatorWaiting(opId);
+    return;
   }
   G.currentSurtidoId=sid;
   initOpState(opId,sid);
